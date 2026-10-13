@@ -838,6 +838,8 @@ async function displays(panel, app) {
               h('span', { class: 'big-emoji' }, '🖥️'),
               h('div', { class: 'grow' }, h('strong', {}, d.name), h('small', { class: 'muted' }, d.lastSeenAt ? `Last active ${new Date(d.lastSeenAt).toLocaleString()}` : 'Not opened yet')),
               h('button', { class: 'btn ghost', onclick: () => displaySettingsForm(d, async (body) => (await patch(`/displays/${d.id}`, body), redraw())) }, 'Settings'),
+              h('a', { class: 'btn ghost', href: `/display?displayId=${encodeURIComponent(d.id)}`,
+                target: '_blank', rel: 'noopener', title: 'Open this display with your signed-in account' }, 'Open display'),
               h(
                 'button',
                 {

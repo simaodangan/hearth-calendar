@@ -1,3 +1,4 @@
+import { t, uiLocale, isChineseDisplay } from './display-locale.js';
 import {
   add,
   addDays,
@@ -6,6 +7,7 @@ import {
   fmtDate,
   fmtTime,
   h,
+  memberBadge,
   readableText,
   sameDay,
   startOfDay,
@@ -39,7 +41,9 @@ export function viewTitle(view, date, weekStartsOn = 0) {
   if (view === 'month') return fmtDate(date, { month: 'long', year: 'numeric' });
   if (view === 'day') return fmtDate(date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const { start, end } = viewRange(view, date, weekStartsOn);
+  if (view === 'week' && isChineseDisplay()) return fmtDate(start, { year: 'numeric', month: 'long', day: 'numeric' });
   const last = addDays(end, -1);
+  if (isChineseDisplay()) return `${fmtDate(start, { year: 'numeric', month: 'long', day: 'numeric' })} – ${fmtDate(last, { year: 'numeric', month: 'long', day: 'numeric' })}`;
   const sameMonth = start.getMonth() === last.getMonth();
   return `${fmtDate(start, { month: 'short', day: 'numeric' })} – ${fmtDate(last, sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' })}, ${last.getFullYear()}`;
 }
@@ -54,6 +58,10 @@ export function bucketByDay(events, start, end) {
   const map = new Map();
   for (const ev of events) {
     const b = eventBounds(ev);
+    // Check overlap before clamping the first day. Otherwise the do/while below
+    // inserts already-ended events into the first day of a day-details sheet.
+    const pointEvent = +b.start === +b.end;
+    if (b.start >= end || (pointEvent ? b.start < start : b.end <= start)) continue;
     let day = startOfDay(b.start < start ? start : b.start);
     do {
       if (day >= end) break;
@@ -125,7 +133,7 @@ function chip(ev, ctx, { showTime = true } = {}) {
           ctx.onEvent(ev);
         },
       },
-      ev.title || '(untitled)',
+      ev.title || t('(untitled)'),
     ), ev, ctx);
   }
   return makeDraggable(h(
@@ -140,7 +148,7 @@ function chip(ev, ctx, { showTime = true } = {}) {
     },
     h('span', { class: 'dot', style: { background: color } }),
     showTime && !ev._continues ? h('span', { class: 'pill-time' }, fmtTime(ev._start)) : null,
-    h('span', { class: 'pill-title' }, ev.title || '(untitled)'),
+    h('span', { class: 'pill-title' }, ev.title || t('(untitled)')),
   ), ev, ctx);
 }
 
@@ -165,7 +173,7 @@ function renderMonth(root, ctx) {
     for (const ev of shown) add(cell, chip(ev, ctx));
     if (list.length > shown.length) {
       add(cell,
-        h('button', { class: 'more', onclick: (e) => (e.stopPropagation(), ctx.onDay(d, true)) }, `+${list.length - shown.length} more`),
+        h('button', { class: 'more', onclick: (e) => (e.stopPropagation(), ctx.onDay(d, true)) }, isChineseDisplay() ? `另有 ${list.length - shown.length} 项` : `+${list.length - shown.length} more`),
       );
     }
     add(grid, cell);
@@ -174,40 +182,41 @@ function renderMonth(root, ctx) {
 }
 
 function eventCard(ev, ctx) {
-  const color = ctx.colorFor(ev);
+  const color = ctx.eventColor || ctx.colorFor(ev);
   const cal = ctx.calendarsById.get(ev.calendarId);
   const member = cal?.memberId ? ctx.membersById.get(cal.memberId) : null;
   const past = ev._end <= ctx.now && !ev.allDay;
   const time = ev.allDay
-    ? 'All day'
+    ? t('All day')
     : ev._continues
-      ? `until ${fmtTime(ev._end)}`
+      ? isChineseDisplay() ? `至 ${fmtTime(ev._end)}` : `until ${fmtTime(ev._end)}`
       : +ev._end === +ev._start
         ? fmtTime(ev._start)
         : `${fmtTime(ev._start)} – ${fmtTime(ev._end)}`;
   return makeDraggable(h(
     'button',
     {
-      class: `card-event${ev.allDay ? ' allday' : ''}${past ? ' past' : ''}`,
-      style: ev.allDay ? { background: color, color: readableText(color) } : { '--c': color },
+      class: `card-event${ev.allDay ? ' allday' : ''}${past ? ' past' : ''}${ctx.titleOnly ? ' title-only' : ''}`,
+      style: ev.allDay || ctx.titleOnly ? { background: color, color: readableText(color), '--c': color } : { '--c': color },
       onclick: (e) => {
         e.stopPropagation();
         ctx.onEvent(ev);
       },
     },
-    h('span', { class: 'ce-title' }, ev.title || '(untitled)'),
-    h(
+    h('span', { class: 'ce-title' }, ev.title || t('(untitled)')),
+    ctx.titleOnly ? null : h(
       'span',
       { class: 'ce-meta' },
       time,
-      ev.recurring ? h('span', { class: 'ce-icon', title: 'Repeats' }, ' ↻') : null,
+      ev.recurring ? h('span', { class: 'ce-icon', title: t('Repeats') }, ' ↻') : null,
       ev.location ? h('span', { class: 'ce-loc' }, ` · ${ev.location}`) : null,
     ),
-    member && !ev.allDay ? h('span', { class: 'ce-member', style: { background: member.color } }, member.emoji || member.name.charAt(0)) : null,
+    member && !ev.allDay && !ctx.titleOnly ? memberBadge(member) : null,
   ), ev, ctx);
 }
 
 function renderWeek(root, ctx) {
+  ctx = { ...ctx, titleOnly: true };
   const { start, end } = viewRange('week', ctx.date, ctx.weekStartsOn);
   const byDay = bucketByDay(ctx.events, start, end);
   const wrap = h('div', { class: 'week' });
@@ -221,10 +230,13 @@ function renderWeek(root, ctx) {
         h(
           'header',
           { class: 'week-head' },
-          h('span', { class: 'wd' }, d.toLocaleDateString([], { weekday: 'short' })),
+          h('span', { class: 'wd' }, d.toLocaleDateString(uiLocale(), { weekday: 'short' })),
           h('span', { class: 'dn' }, d.getDate()),
         ),
-        h('div', { class: 'week-body' }, list.length ? list.map((ev) => eventCard(ev, ctx)) : h('span', { class: 'empty-day' }, '')),
+        h('div', { class: `week-body${ctx.dayContent ? ' with-day-content' : ''}` },
+          ctx.dayContent ? h('div', { class: 'week-events' }, list.map((ev) => eventCard(ev, ctx)))
+            : list.length ? list.map((ev) => eventCard(ev, ctx)) : h('span', { class: 'empty-day' }, ''),
+          ctx.dayContent?.(d)),
       ), d, ctx),
     );
   }
@@ -250,13 +262,13 @@ function renderAgenda(root, ctx) {
           'header',
           { class: 'agenda-head', onclick: () => ctx.onDay(d) },
           h('span', { class: 'dn' }, d.getDate()),
-          h('span', {}, h('strong', {}, isToday ? 'Today' : d.toLocaleDateString([], { weekday: 'long' })), h('small', {}, fmtDate(d, { month: 'long', year: 'numeric' }))),
+          h('span', {}, h('strong', {}, isToday ? t('Today') : d.toLocaleDateString(uiLocale(), { weekday: 'long' })), h('small', {}, fmtDate(d, { month: 'long', year: 'numeric' }))),
         ),
-        h('div', { class: 'agenda-list' }, list.length ? list.map((ev) => eventCard(ev, ctx)) : h('p', { class: 'muted' }, 'Nothing planned.')),
+        h('div', { class: 'agenda-list' }, list.length ? list.map((ev) => eventCard(ev, ctx)) : h('p', { class: 'muted' }, t('Nothing planned.'))),
       ),
     );
   }
-  if (!any) add(wrap, h('p', { class: 'muted center' }, 'Nothing planned for the next two weeks.'));
+  if (!any) add(wrap, h('p', { class: 'muted center' }, t('Nothing planned for the next two weeks.')));
   add(root, wrap);
 }
 
@@ -308,7 +320,7 @@ function renderDay(root, ctx) {
     },
   });
   for (let hr = 0; hr < 24; hr++) {
-    add(grid, h('div', { class: 'dv-hour', style: { top: `${hr * HOUR_PX}px`, height: `${HOUR_PX}px` } }, h('span', { class: 'dv-label' }, hr === 0 ? '' : new Date(2000, 0, 1, hr).toLocaleTimeString([], { hour: 'numeric' }))));
+    add(grid, h('div', { class: 'dv-hour', style: { top: `${hr * HOUR_PX}px`, height: `${HOUR_PX}px` } }, h('span', { class: 'dv-label' }, hr === 0 ? '' : new Date(2000, 0, 1, hr).toLocaleTimeString(uiLocale(), { hour: 'numeric' }))));
   }
   for (const item of layoutDay(timed, dayStart)) {
     const { ev } = item;
@@ -332,7 +344,7 @@ function renderDay(root, ctx) {
             ctx.onEvent(ev);
           },
         },
-        h('span', { class: 'ce-title' }, ev.title || '(untitled)'),
+        h('span', { class: 'ce-title' }, ev.title || t('(untitled)')),
         item.height > 34 ? h('span', { class: 'ce-meta' }, `${fmtTime(ev._start)} – ${fmtTime(ev._end)}${ev.location ? ` · ${ev.location}` : ''}`) : null,
       ),
     );
@@ -347,7 +359,7 @@ function renderDay(root, ctx) {
     h(
       'div',
       { class: 'dayview' },
-      allDay.length ? h('div', { class: 'dv-allday' }, h('span', { class: 'dv-label' }, 'All day'), h('div', { class: 'dv-allday-list' }, allDay.map((ev) => eventCard(ev, ctx)))) : null,
+      allDay.length ? h('div', { class: 'dv-allday' }, h('span', { class: 'dv-label' }, t('All day')), h('div', { class: 'dv-allday-list' }, allDay.map((ev) => eventCard(ev, ctx)))) : null,
       scroller,
     ),
   );

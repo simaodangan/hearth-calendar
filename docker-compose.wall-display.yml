@@ -1,0 +1,7 @@
+# Use with docker-compose.yml. Isolate the trial deployment with -p hearth-wall-test.
+services:
+  app:
+    image: hearth-calendar:custom-wall-display
+    platform: linux/arm64
+    build:
+      context: ./app

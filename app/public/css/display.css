@@ -1,4 +1,28 @@
 /* Wall display: large type, touch targets, no page scroll. */
+.display .d-controls .d-today { height: 32px; min-height: 32px; padding: 0 12px; line-height: 1; }
+.display .d-date-nav { align-items: center; }
+.display .d-date-nav > .icon-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0; font-size: 22px; line-height: 1; }
+
+/* Chores flow inside the existing scrollable week body without changing its grid. */
+.d-day-chores { display: grid; grid-auto-rows: 34px; gap: 4px; margin-top: auto; padding-top: 8px; flex-shrink: 0; max-height: 65%; overflow: auto; }
+.d-day-chore-gap { height: 34px; }
+.d-day-chores { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+.d-day-chore { min-width: 0; }
+.d-day-chore { touch-action: manipulation; }
+.d-calendar .week-body.with-day-content { overflow: hidden; }
+.d-calendar .week-events { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 1; overflow: auto; }
+.d-calendar .week-events .card-event { flex-shrink: 0; }
+.d-day-chore { display: flex; align-items: center; width: 100%; min-height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 7px; text-align: left; background: var(--surface); color: var(--ink); }
+.d-day-chore-icons { display: grid; place-items: center; align-self: stretch; width: 28px; flex-shrink: 0; background: var(--c); border-radius: 6px 0 0 6px; }
+.d-day-chore { position: relative; }
+.d-day-chore-done-mark { position: absolute; top: 1px; right: 2px; color: var(--c); font-size: 12px; font-weight: 900; line-height: 1; pointer-events: none; }
+.d-day-chore-icons .ce-member { position: static; width: auto; height: auto; border-radius: 0; font-size: 14px; color: inherit; }
+.d-calendar .card-event.title-only { padding: 8px; border: none; }
+.d-day-chore-title { flex: 1; min-width: 0; padding: 4px 6px; font-size: .9em; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.d-day-chore.done .d-day-chore-title { text-decoration: line-through; }
+.d-day-chore.done { background: color-mix(in srgb, var(--c) 15%, var(--surface)); }
+.d-day-chore:disabled { opacity: .75; cursor: default; }
+.d-calendar .week-body > .card-event { flex-shrink: 0; }
 
 .display-page {
   height: 100dvh;
@@ -102,7 +126,7 @@
   gap: 14px;
 }
 .d-body.with-chores {
-  grid-template-columns: minmax(0, 1fr) clamp(260px, 22vw, 400px);
+  grid-template-columns: minmax(0, 1fr) clamp(230px, 18vw, 300px);
 }
 
 .d-calendar {
@@ -135,8 +159,10 @@
   font-size: 0.85em;
 }
 .d-calendar .week-head .dn {
-  font-size: 1.9em;
+  font-size: 1em;
+  color: var(--muted);
 }
+.d-calendar .week-head .wd { font-size: 1.35em; letter-spacing: 0; }
 .d-calendar .agenda {
   max-width: none;
 }
@@ -168,10 +194,15 @@
   background: var(--surface);
 }
 .d-chores .chore .check {
-  width: 44px;
-  height: 44px;
-  font-size: 22px;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
 }
+.d-chores .board-head .star-chip,
+.d-chores .board-head .ring {
+  display: none;
+}
+.d-chores .chore { gap: 8px; }
 
 /* Tall screens (a wall tablet mounted in portrait): calendar on top, side panel below, no page scroll. */
 @media (orientation: portrait) and (min-width: 601px) {

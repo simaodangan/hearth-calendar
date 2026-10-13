@@ -1,3 +1,4 @@
+import { t, uiLocale, isChineseDisplay } from './display-locale.js';
 /** Tiny DOM builder: h('div', { class: 'x', onclick }, 'text', child, [more]) */
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
@@ -73,16 +74,23 @@ export function sameDay(a, b) {
 export const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export function fmtTime(date) {
-  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(' ', '').toLowerCase();
+  if (isChineseDisplay()) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return date.toLocaleTimeString(uiLocale(), { hour: 'numeric', minute: '2-digit' }).replace(':00', '').replace(' ', '').toLowerCase();
 }
 
 export function fmtDate(date, opts = { weekday: 'long', month: 'long', day: 'numeric' }) {
-  return date.toLocaleDateString([], opts);
+  if (isChineseDisplay() && opts.year && opts.month && !opts.day) {
+    return `${date.getFullYear()}/${date.getMonth() + 1}`;
+  }
+  if (isChineseDisplay() && opts.year && opts.month && opts.day) {
+    return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+  }
+  return date.toLocaleDateString(uiLocale(), opts);
 }
 
 export function weekdayNames(weekStartsOn = 0, style = 'short') {
   const base = new Date(2023, 0, 1); // a Sunday
-  return Array.from({ length: 7 }, (_, i) => addDays(base, i + weekStartsOn).toLocaleDateString([], { weekday: style }));
+  return Array.from({ length: 7 }, (_, i) => addDays(base, i + weekStartsOn).toLocaleDateString(uiLocale(), { weekday: style }));
 }
 
 /** Converts an API occurrence into local Date bounds. All-day ends are exclusive midnights. */
@@ -96,8 +104,8 @@ export function describeWhen(ev) {
   if (ev.allDay) {
     const last = addDays(end, -1);
     return sameDay(start, last)
-      ? `${fmtDate(start)} · All day`
-      : `${fmtDate(start, { month: 'short', day: 'numeric' })} – ${fmtDate(last, { month: 'short', day: 'numeric' })} · All day`;
+      ? `${fmtDate(start)} · ${t('All day')}`
+      : `${fmtDate(start, { month: 'short', day: 'numeric' })} – ${fmtDate(last, { month: 'short', day: 'numeric' })} · ${t('All day')}`;
   }
   if (sameDay(start, end) || +end === +start) return `${fmtDate(start)} · ${fmtTime(start)} – ${fmtTime(end)}`;
   return `${fmtDate(start, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(start)} – ${fmtDate(end, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(end)}`;
@@ -175,7 +183,7 @@ export function modal({ title, content, actions = [], wide = false, onClose }) {
   const dialog = h(
     'div',
     { class: `modal${wide ? ' wide' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-    h('header', { class: 'modal-head' }, h('h2', {}, title), h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: close }, '✕')),
+    h('header', { class: 'modal-head' }, h('h2', {}, title), h('button', { class: 'icon-btn', 'aria-label': t('Close'), onclick: close }, '✕')),
     body,
     actions.length ? h('footer', { class: 'modal-foot' }, actions) : null,
   );
@@ -186,7 +194,7 @@ export function modal({ title, content, actions = [], wide = false, onClose }) {
   return { el: dialog, body, close };
 }
 
-export function confirmDialog(message, { title = 'Are you sure?', okLabel = 'OK', danger = false } = {}) {
+export function confirmDialog(message, { title = t('Are you sure?'), okLabel = t('OK'), danger = false } = {}) {
   return new Promise((resolve) => {
     let done = false;
     const finish = (value) => {
@@ -199,7 +207,7 @@ export function confirmDialog(message, { title = 'Are you sure?', okLabel = 'OK'
       title,
       content: h('p', {}, message),
       actions: [
-        h('button', { class: 'btn', onclick: () => finish(false) }, 'Cancel'),
+        h('button', { class: 'btn', onclick: () => finish(false) }, t('Cancel')),
         h('button', { class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => finish(true) }, okLabel),
       ],
       onClose: () => finish(false),
@@ -257,11 +265,21 @@ export function toggle(label, checked, onChange) {
   return h('label', { class: 'switch' }, input, h('span', { class: 'track' }), h('span', {}, label));
 }
 
+export function memberGlyph(member) {
+  return member?.emoji || Array.from((member?.name || '').trim()).at(-1)?.toUpperCase() || '?';
+}
+
+/** Small circular name badge shared by calendar events and weekly chores. */
+export function memberBadge(member) {
+  return h('span', { class: 'ce-member', title: member.name,
+    style: { background: member.color || '#8d7b6a' } }, memberGlyph(member));
+}
+
 export function avatar(member, size = '') {
   return h(
     'span',
     { class: `avatar ${size}`, style: { background: member?.color || '#8d7b6a', color: readableText(member?.color || '#8d7b6a') } },
-    member?.emoji || (member?.name || '?').trim().charAt(0).toUpperCase(),
+    memberGlyph(member),
   );
 }
 

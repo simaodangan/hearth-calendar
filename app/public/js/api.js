@@ -1,3 +1,4 @@
+import { t } from './display-locale.js';
 let displayToken = null;
 
 export function setDisplayToken(token) {
@@ -29,7 +30,7 @@ export async function api(method, path, body) {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError(0, 'Cannot reach the server. Check your connection.');
+    throw new ApiError(0, t('Cannot reach the server. Check your connection.'));
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(res.status, data.error || `Request failed (${res.status})`);

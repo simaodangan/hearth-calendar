@@ -1,5 +1,6 @@
+import { t, uiLocale, isChineseDisplay } from './display-locale.js';
 import { del, get, patch, post } from './api.js';
-import { add, avatar, busy, clear, confirmDialog, field, h, modal, parseYmd, toast, weekdayNames, ymd } from './util.js';
+import { add, avatar, busy, clear, confirmDialog, field, h, memberGlyph, modal, parseYmd, toast, weekdayNames, ymd } from './util.js';
 
 export const EVERY_DAY = 127;
 export const WEEKDAYS = 62;
@@ -16,15 +17,15 @@ export function isShownOn(item, day) {
 
 export function describeRepeat(bits) {
   if (!bits) return '';
-  if (bits === EVERY_DAY) return 'Every day';
-  if (bits === WEEKDAYS) return 'Weekdays';
-  if (bits === 65) return 'Weekends';
+  if (bits === EVERY_DAY) return t('Every day');
+  if (bits === WEEKDAYS) return t('Weekdays');
+  if (bits === 65) return t('Weekends');
   const names = weekdayNames(0, 'short');
   return names.filter((_, i) => bits & (1 << i)).join(', ');
 }
 
 /**
- * Chore chart: one column per family member plus "Anyone".
+ * Chore chart: one column per family member plus t("Anyone").
  * ctx: { root, items, lists, members, day, editable, onToggle(item, done), onEdit?(item), onAdd?(memberId), compact }
  */
 export function renderChoreBoard(ctx) {
@@ -39,7 +40,7 @@ export function renderChoreBoard(ctx) {
 
   const visibleColumns = ctx.compact ? columns.filter((c) => c.items.length) : columns;
   if (!visibleColumns.length) {
-    add(root, h('div', { class: 'board-empty' }, h('span', { class: 'big-emoji' }, '🎉'), h('p', {}, ctx.compact ? 'No chores today' : 'Nothing to do on this day.')));
+    add(root, h('div', { class: 'board-empty' }, h('span', { class: 'big-emoji' }, '🎉'), h('p', {}, ctx.compact ? t('No chores today') : t('Nothing to do on this day.'))));
     return;
   }
 
@@ -56,15 +57,15 @@ export function renderChoreBoard(ctx) {
           'header',
           { class: 'board-head' },
           member ? avatar(member, 'lg') : h('span', { class: 'avatar lg anyone' }, '★'),
-          h('div', {}, h('strong', {}, member ? member.name : 'Anyone'), h('small', {}, `${done} of ${col.items.length} done`)),
-          member && ctx.stars ? h('span', { class: 'star-chip', title: 'Stars earned' }, `⭐ ${ctx.stars[member.id] || 0}`) : null,
+          h('div', {}, h('strong', {}, member ? member.name : t('Anyone')), h('small', {}, isChineseDisplay() ? `已完成 ${done}/${col.items.length}` : `${done} of ${col.items.length} done`)),
+          member && ctx.stars ? h('span', { class: 'star-chip', title: t('Stars earned') }, `⭐ ${ctx.stars[member.id] || 0}`) : null,
           h('div', { class: 'ring', style: { '--p': pct } }),
         ),
         h(
           'ul',
           { class: 'chores' },
           col.items
-            .sort((a, b) => Number(a.done) - Number(b.done))
+            .slice().sort(ctx.preserveOrder ? () => 0 : (a, b) => Number(a.done) - Number(b.done))
             .map((item) => {
               const list = listsById.get(item.listId);
               const canEdit = list && list.permission !== 'view' && ctx.editable !== false;
@@ -77,7 +78,7 @@ export function renderChoreBoard(ctx) {
                   {
                     class: 'check',
                     'aria-pressed': String(item.done),
-                    'aria-label': `${item.done ? 'Mark not done' : 'Mark done'}: ${item.title}`,
+                    'aria-label': `${isChineseDisplay() ? (item.done ? '取消完成' : '标记完成') : (item.done ? 'Mark not done' : 'Mark done')}: ${item.title}`,
                     disabled: !canEdit,
                     onclick: (e) => ctx.onToggle(item, !item.done, e.currentTarget),
                   },
@@ -90,11 +91,16 @@ export function renderChoreBoard(ctx) {
                   h(
                     'small',
                     {},
-                    [item.repeatDays ? `↻ ${describeRepeat(item.repeatDays)}` : null, overdue ? `Overdue (${parseYmd(item.dueDate).toLocaleDateString()})` : null, ctx.lists.length > 1 ? list?.name : null]
+                    [item.repeatDays ? `↻ ${describeRepeat(item.repeatDays)}` : null, overdue ? isChineseDisplay() ? `已逾期（${parseYmd(item.dueDate).toLocaleDateString('zh-CN')}）` : `Overdue (${parseYmd(item.dueDate).toLocaleDateString()})` : null, ctx.lists.length > 1 ? list?.name : null]
                       .filter(Boolean)
                       .join(' · '),
                   ),
                 ),
+                ctx.showEditButton && ctx.onEdit && canEdit ? h('button', {
+                  class: 'btn ghost d-edit-chore', type: 'button',
+                  'aria-label': `${t('Edit chore')}: ${item.title}`,
+                  onclick: () => ctx.onEdit(item),
+                }, t('Edit')) : null,
               );
             }),
         ),
@@ -106,6 +112,7 @@ export function renderChoreBoard(ctx) {
 }
 
 export async function toggleItem(item, done, day, button) {
+  const previousCompletedAt = item.completedAt;
   button?.classList.add('pop');
   item.done = done;
   item.completedAt = done ? new Date().toISOString() : null;
@@ -113,6 +120,7 @@ export async function toggleItem(item, done, day, button) {
     await post(`/items/${item.id}/complete`, { done, day });
   } catch (err) {
     item.done = !done;
+    item.completedAt = previousCompletedAt;
     toast(err.message, 'error');
     throw err;
   }
@@ -123,52 +131,70 @@ export function openChoreEditor(ctx) {
   const item = ctx.item;
   const editableLists = ctx.lists.filter((l) => l.permission !== 'view');
   if (!editableLists.length) {
-    toast('Create a chore list in Settings first.', 'error');
+    toast(t('Create a chore list in Settings first.'), 'error');
     return;
   }
-  const title = h('input', { type: 'text', value: item?.title || '', placeholder: 'e.g. Feed the dog', maxlength: 200 });
+  const title = h('input', { type: 'text', value: item?.title || '', placeholder: t('e.g. Feed the dog'), maxlength: 200 });
   const list = h('select', {}, editableLists.map((l) => h('option', { value: l.id, selected: l.id === (item?.listId || ctx.listId) }, l.name)));
   const member = h('select', {});
   const fillMembers = () => {
     const owner = ctx.lists.find((l) => l.id === list.value)?.ownerId;
     const chosen = member.value || item?.memberId || ctx.memberId || '';
     add(clear(member),
-      h('option', { value: '' }, 'Anyone'),
+      h('option', { value: '' }, t('Anyone')),
       ...ctx.members.filter((m) => m.ownerId === owner).map((m) => h('option', { value: m.id, selected: m.id === chosen }, `${m.emoji ? `${m.emoji} ` : ''}${m.name}`)),
     );
   };
   list.addEventListener('change', fillMembers);
   fillMembers();
 
-  let bits = item?.repeatDays || 0;
+  let bits = item ? (item.repeatDays || 0) : EVERY_DAY;
   const mode = h(
     'select',
     {},
     [
-      ['once', 'One-time task'],
-      ['daily', 'Every day'],
-      ['weekdays', 'Weekdays'],
-      ['custom', 'Specific days'],
+      ['once', t('One-time task')],
+      ['daily', t('Every day')],
+      ['weekdays', t('Weekdays')],
+      ['custom', t('Specific days')],
     ].map(([v, label]) => h('option', { value: v, selected: v === (bits === 0 ? 'once' : bits === EVERY_DAY ? 'daily' : bits === WEEKDAYS ? 'weekdays' : 'custom') }, label)),
   );
   const names = weekdayNames(0, 'narrow');
   const dayButtons = names.map((n, i) =>
-    h('button', { type: 'button', class: `day-toggle${bits & (1 << i) ? ' on' : ''}`, onclick: (e) => e.currentTarget.classList.toggle('on') }, n),
+    h('button', {
+      type: 'button', class: `day-toggle${bits & (1 << i) ? ' on' : ''}`,
+      'aria-pressed': String(Boolean(bits & (1 << i))),
+      'aria-label': weekdayNames(0, 'long')[i],
+      onclick: (e) => {
+        e.currentTarget.classList.toggle('on');
+        e.currentTarget.setAttribute('aria-pressed', String(e.currentTarget.classList.contains('on')));
+        // Changing any weekday makes the selected buttons the authoritative custom schedule.
+        mode.value = 'custom';
+      },
+    }, n),
   );
   const daysRow = h('div', { class: 'day-toggles' }, dayButtons);
   const due = h('input', { type: 'date', value: item?.dueDate || '' });
-  const dueField = field('Due date (optional)', due);
-  const stars = h('select', {}, [0, 1, 2, 3, 4, 5, 10].map((n) => h('option', { value: n, selected: n === (item?.stars ?? 1) }, n === 0 ? 'No stars' : `${'⭐'.repeat(Math.min(n, 5))}${n > 5 ? ` ×${n}` : ''} (${n})`)));
-  const starsField = field('Stars when done', stars, 'Earned by the person it’s assigned to. Spend them in ⭐ Rewards.');
+  const dueField = field(t('Due date (optional)'), due);
+  const stars = h('select', {}, [0, 1, 2, 3, 4, 5, 10].map((n) => h('option', { value: n, selected: n === (item?.stars ?? 1) }, n === 0 ? t('No stars') : `${'⭐'.repeat(Math.min(n, 5))}${n > 5 ? ` ×${n}` : ''} (${n})`)));
+  const starsField = field(t('Stars when done'), stars, t('Earned by the person it’s assigned to. Spend them in ⭐ Rewards.'));
   const sync = () => {
-    daysRow.hidden = mode.value !== 'custom';
-    dueField.querySelector('.field-label').textContent = mode.value === 'once' ? 'Due date (optional)' : 'Starting on (optional)';
+    daysRow.hidden = mode.value === 'once';
+    dueField.querySelector('.field-label').textContent = mode.value === 'once' ? t('Due date (optional)') : t('Starting on (optional)');
   };
-  mode.addEventListener('change', sync);
+  mode.addEventListener('change', () => {
+    const preset = { daily: EVERY_DAY, weekdays: WEEKDAYS }[mode.value];
+    if (preset !== undefined) dayButtons.forEach((button, i) => {
+      const selected = Boolean(preset & (1 << i));
+      button.classList.toggle('on', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    sync();
+  });
   sync();
 
-  const save = h('button', { class: 'btn primary' }, item ? 'Save' : 'Add');
-  const actions = [h('button', { class: 'btn', onclick: () => m.close() }, 'Cancel'), save];
+  const save = h('button', { class: 'btn primary' }, item ? t('Save') : t('Add'));
+  const actions = [h('button', { class: 'btn', onclick: () => m.close() }, t('Cancel')), save];
   if (item) {
     actions.unshift(
       h(
@@ -176,7 +202,7 @@ export function openChoreEditor(ctx) {
         {
           class: 'btn danger ghost left',
           onclick: async () => {
-            if (!(await confirmDialog(`Delete “${item.title}”?`, { okLabel: 'Delete', danger: true }))) return;
+            if (!(await confirmDialog(`Delete “${item.title}”?`, { okLabel: t('Delete'), danger: true }))) return;
             try {
               await del(`/items/${item.id}`);
               m.close();
@@ -186,22 +212,22 @@ export function openChoreEditor(ctx) {
             }
           },
         },
-        'Delete',
+        t('Delete'),
       ),
     );
   }
   const m = modal({
-    title: item ? 'Edit chore' : 'New chore',
-    content: h('form', { class: 'stack', onsubmit: (e) => (e.preventDefault(), save.click()) }, field('Task', title), field('List', list), field('Who', member), field('Repeats', mode), daysRow, dueField, starsField, h('input', { type: 'submit', hidden: true })),
+    title: item ? t('Edit chore') : t('New chore'),
+    content: h('form', { class: 'stack', onsubmit: (e) => (e.preventDefault(), save.click()) }, field(t('Task'), title), field(t('List'), list), field(t('Who'), member), field(t('Repeats'), mode), daysRow, dueField, starsField, h('input', { type: 'submit', hidden: true })),
     actions,
   });
 
   save.addEventListener(
     'click',
     busy(save, async () => {
-      if (!title.value.trim()) throw new Error('Please enter a task.');
+      if (!title.value.trim()) throw new Error(t('Please enter a task.'));
       bits = { once: 0, daily: EVERY_DAY, weekdays: WEEKDAYS }[mode.value] ?? dayButtons.reduce((acc, b, i) => (b.classList.contains('on') ? acc | (1 << i) : acc), 0);
-      if (mode.value === 'custom' && !bits) throw new Error('Pick at least one day.');
+      if (mode.value === 'custom' && !bits) throw new Error(t('Pick at least one day.'));
       const body = { title: title.value.trim(), memberId: member.value || null, repeatDays: bits || null, dueDate: due.value || null, stars: Number(stars.value) };
       if (item) await patch(`/items/${item.id}`, { ...body, listId: list.value });
       else await post(`/lists/${list.value}/items`, body);
@@ -226,7 +252,7 @@ export async function openRewards(ctx) {
       const emoji = h('input', { type: 'text', value: reward?.emoji || '', placeholder: '🍦', maxlength: 8, class: 'narrow' });
       const title = h('input', { type: 'text', value: reward?.title || '', placeholder: 'Ice cream trip', maxlength: 100 });
       const cost = h('input', { type: 'number', min: 1, max: 10000, value: reward?.cost || 20, class: 'narrow' });
-      const save = h('button', { class: 'btn primary' }, reward ? 'Save' : 'Add reward');
+      const save = h('button', { class: 'btn primary' }, reward ? t('Save') : 'Add reward');
       const f = modal({
         title: reward ? 'Edit reward' : 'New reward',
         content: h('div', { class: 'stack' }, h('div', { class: 'row gap-s' }, field('Emoji', emoji), h('div', { class: 'grow' }, field('Reward', title))), field('Cost in stars', cost)),
@@ -242,10 +268,10 @@ export async function openRewards(ctx) {
                     draw();
                   },
                 },
-                'Delete',
+                t('Delete'),
               )
             : null,
-          h('button', { class: 'btn', onclick: () => f.close() }, 'Cancel'),
+          h('button', { class: 'btn', onclick: () => f.close() }, t('Cancel')),
           save,
         ].filter(Boolean),
       });
@@ -263,11 +289,11 @@ export async function openRewards(ctx) {
     const adjust = (person) => {
       const amount = h('input', { type: 'number', value: 5, class: 'narrow' });
       const reason = h('input', { type: 'text', placeholder: 'Helped with dinner', maxlength: 120 });
-      const save = h('button', { class: 'btn primary' }, 'Save');
+      const save = h('button', { class: 'btn primary' }, t('Save'));
       const f = modal({
         title: `Stars for ${person.name}`,
         content: h('div', { class: 'stack' }, field('Stars (use a minus sign to take some away)', amount), field('Why (optional)', reason)),
-        actions: [h('button', { class: 'btn', onclick: () => f.close() }, 'Cancel'), save],
+        actions: [h('button', { class: 'btn', onclick: () => f.close() }, t('Cancel')), save],
       });
       save.addEventListener(
         'click',
@@ -346,9 +372,9 @@ export async function openRewards(ctx) {
                 h('span', { class: 'big-emoji' }, r.emoji || '🎁'),
                 h('div', { class: 'grow' }, h('strong', {}, r.title), h('small', { class: 'muted' }, `${r.cost} ⭐`)),
                 mine.map((p) =>
-                  h('button', { class: `btn ${(balances[p.id] || 0) >= r.cost ? 'primary' : ''}`, disabled: (balances[p.id] || 0) < r.cost, title: `Redeem for ${p.name}`, onclick: () => redeem(r, p) }, `${p.emoji || p.name.charAt(0)} Redeem`),
+                  h('button', { class: `btn ${(balances[p.id] || 0) >= r.cost ? 'primary' : ''}`, disabled: (balances[p.id] || 0) < r.cost, title: `Redeem for ${p.name}`, onclick: () => redeem(r, p) }, `${memberGlyph(p)} Redeem`),
                 ),
-                r.mine ? h('button', { class: 'btn ghost', onclick: () => rewardForm(r) }, 'Edit') : null,
+                r.mine ? h('button', { class: 'btn ghost', onclick: () => rewardForm(r) }, t('Edit')) : null,
               ),
             ),
           )

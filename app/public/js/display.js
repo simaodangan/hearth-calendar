@@ -1,10 +1,13 @@
+import { t, uiLocale } from './display-locale.js';
 import { get, post, setDisplayToken } from './api.js';
 import { drawCountdowns } from './calendar-extras.js';
 import { renderCalendar, shiftDate, viewRange, viewTitle, dayEvents, eventCard } from './calendar-view.js';
 import { renderChoreBoard, toggleItem } from './chores.js';
 import { nightOverlay, photoFrame, upNextStrip, weatherWidget } from './display-extras.js';
 import { openEventDetails, openEventEditor } from './event-editor.js';
-import { add, avatar, clear, fmtDate, h, modal, sameDay, toast, ymd } from './util.js';
+import { add, avatar, clear, fmtDate, h, modal, sameDay, startOfDay, toast, ymd } from './util.js';
+
+import { loadWeekChores, renderDayChores, displayView, weekChoreSlots } from './display-chores.js';
 
 const TOKEN_KEY = 'hearth.displayToken';
 const root = document.getElementById('display');
@@ -24,7 +27,8 @@ function storage(action, key, value) {
 // address bar so an iPad "Add to Home Screen" icon (which gets its own storage) keeps working.
 const fromHash = new URLSearchParams(location.hash.slice(1)).get('token');
 if (fromHash) storage('set', TOKEN_KEY, fromHash);
-const token = fromHash || storage('get', TOKEN_KEY);
+const ownerDisplayId = new URLSearchParams(location.search).get('displayId');
+const token = fromHash || (ownerDisplayId ? null : storage('get', TOKEN_KEY));
 if (token) setDisplayToken(token);
 
 const state = {
@@ -42,6 +46,7 @@ const state = {
   lastWeather: 0,
   lastPhotoList: 0,
   items: [],
+  weekItems: new Map(),
   memberFilter: new Set(),
   lastInteraction: Date.now(),
   today: ymd(new Date()),
@@ -57,10 +62,10 @@ function showSignedOut(message) {
     h(
       'div',
       { class: 'auth-card center' },
-      h('div', { class: 'brand big' }, h('span', { class: 'brand-mark' }, '◐'), 'Hearth Display'),
+      h('div', { class: 'brand big' }, h('span', { class: 'brand-mark' }, '◐'), t('Hearth Display')),
       h('p', {}, message),
-      h('p', { class: 'muted' }, 'Create a display link in Settings → Wall displays and open it on this screen, or sign in to preview.'),
-      h('a', { class: 'btn primary', href: '/login' }, 'Sign in'),
+      h('p', { class: 'muted' }, t('Create a display link in Settings → Wall displays and open it on this screen, or sign in to preview.')),
+      h('a', { class: 'btn primary', href: '/login' }, t('Sign in')),
     ),
   );
 }
@@ -77,7 +82,7 @@ function ctx() {
     colorFor: (ev) => byId.get(ev.calendarId)?.color || '#8d7b6a',
     defaultCalendarId: state.calendars.find((c) => c.writable)?.id,
     allowEditing: state.settings.allowEditing,
-    onChange: refreshEvents,
+    onChange: refreshEventViews,
   };
 }
 
@@ -91,12 +96,18 @@ function visibleEvents() {
 
 function drawClock() {
   const now = new Date();
-  els.time.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  els.time.textContent = now.toLocaleTimeString(uiLocale(), { hour: 'numeric', minute: '2-digit' });
   els.date.textContent = fmtDate(now, { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
 function drawCalendar() {
+  if (els.choreSection) els.choreSection.hidden = state.view === 'week';
+  const showSide = Boolean(els.side && (state.settings.showMeals || state.settings.showLists ||
+    (state.settings.showChores && state.view !== 'week')));
+  if (els.side) els.side.hidden = !showSide;
+  els.body.classList.toggle('with-chores', showSide);
   const c = ctx();
+  const slots = weekChoreSlots(state.weekItems, state.lists, state.memberFilter, ymd(new Date()), state.members);
   els.title.textContent = viewTitle(state.view, state.date, state.settings.weekStartsOn);
   els.viewButtons.forEach((b) => b.classList.toggle('on', b.dataset.view === state.view));
   renderCalendar(els.calendar, {
@@ -106,6 +117,16 @@ function drawCalendar() {
     events: visibleEvents(),
     weekStartsOn: state.settings.weekStartsOn,
     compact: true,
+    dayContent: state.view === 'week' && state.settings.showChores ? (day) => renderDayChores({
+      day: ymd(day), today: ymd(new Date()), items: state.weekItems.get(ymd(day)) || [],
+      lists: state.lists, members: state.members, memberFilter: state.memberFilter,
+      slots,
+      onToggle: async (item, done, key, button) => {
+        button.disabled = true;
+        try { await toggleItem(item, done, key, button); } catch {}
+        await refreshAll();
+      },
+    }) : undefined,
     onEvent: (ev) => openEventDetails(ev, c),
     onDay: (day) => {
       const list = dayEvents(visibleEvents(), day);
@@ -114,11 +135,15 @@ function drawCalendar() {
         content: h(
           'div',
           { class: 'agenda-list' },
-          list.length ? list.map((ev) => eventCard(ev, { ...c, now: new Date(), onEvent: (e) => (m.close(), openEventDetails(e, c)) })) : h('p', { class: 'muted' }, 'Nothing planned.'),
+          list.length ? list.map((ev) => eventCard(ev, { ...c, now: new Date(), onEvent: (e) => (m.close(), openEventDetails(e, c)) })) : h('p', { class: 'muted' }, t('Nothing planned.')),
         ),
-        actions: state.settings.allowEditing && c.defaultCalendarId ? [h('button', { class: 'btn primary', onclick: () => (m.close(), openEventEditor({ ...c, date: day })) }, '+ Add event')] : [],
+        actions: state.settings.allowEditing && c.defaultCalendarId ? [h('button', { class: 'btn primary', onclick: () => (m.close(), openEventEditor({ ...c, date: day })) }, t('+ Add event'))] : [],
       });
     },
+  });
+  const choreGroups = [...els.calendar.querySelectorAll('.d-day-chores')];
+  for (const group of choreGroups) group.addEventListener('scroll', () => {
+    for (const other of choreGroups) if (other !== group && other.scrollTop !== group.scrollTop) other.scrollTop = group.scrollTop;
   });
 }
 
@@ -128,7 +153,7 @@ function drawChips() {
   clear(els.chips);
   if (people.length < 2) return;
   add(els.chips,
-    h('button', { class: `chip${state.memberFilter.size ? '' : ' on'}`, onclick: () => (state.memberFilter.clear(), drawChips(), drawCalendar()) }, 'Everyone'),
+    h('button', { class: `chip${state.memberFilter.size ? '' : ' on'}`, onclick: () => (state.memberFilter.clear(), drawChips(), drawCalendar()) }, t('Everyone')),
     people.map((m) =>
       h(
         'button',
@@ -161,14 +186,15 @@ function drawChores() {
     stars: state.stars,
     day: state.today,
     compact: true,
+    preserveOrder: true,
     onToggle: async (item, done, button) => {
       await toggleItem(item, done, state.today, button).catch(() => {});
-      drawChores();
+      await refreshAll();
     },
   });
 }
 
-const SLOT_NAMES = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack' };
+const SLOT_NAMES = { breakfast: t('Breakfast'), lunch: t('Lunch'), dinner: t('Dinner'), snack: t('Snack') };
 const SLOT_ORDER = { breakfast: 1, lunch: 2, dinner: 3, snack: 4 };
 
 /** Today's and tomorrow's planned meals. */
@@ -179,8 +205,8 @@ function drawMeals() {
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
   const days = [
-    ['Today', state.today],
-    ['Tomorrow', ymd(tomorrow)],
+    [t('Today'), state.today],
+    [t('Tomorrow'), ymd(tomorrow)],
   ];
   add(
     clear(els.mealsBox),
@@ -191,8 +217,8 @@ function drawMeals() {
         { class: 'd-meal-day' },
         h('strong', {}, label),
         here.length
-          ? here.map((m) => h('div', { class: 'd-meal' }, h('span', { class: 'muted' }, SLOT_NAMES[m.mealSlot] || 'Meal'), h('span', {}, m.title)))
-          : h('div', { class: 'd-meal muted' }, 'Nothing planned'),
+          ? here.map((m) => h('div', { class: 'd-meal' }, h('span', { class: 'muted' }, SLOT_NAMES[m.mealSlot] || t('Meal')), h('span', {}, m.title)))
+          : h('div', { class: 'd-meal muted' }, t('Nothing planned')),
       );
     }),
   );
@@ -205,7 +231,7 @@ function drawChecklists() {
   requestAnimationFrame(() => (els.side.scrollTop = scroll));
   clear(els.listsBox);
   if (!state.checklists.length) {
-    add(els.listsBox, h('p', { class: 'muted' }, 'No lists are set to show on displays.'));
+    add(els.listsBox, h('p', { class: 'muted' }, t('No lists are set to show on displays.')));
     return;
   }
   for (const list of state.checklists) {
@@ -213,7 +239,7 @@ function drawChecklists() {
     const mine = state.items.filter((i) => i.listId === list.id);
     const open = mine.filter((i) => !i.done);
     const checked = mine.length - open.length;
-    const input = h('input', { type: 'text', placeholder: `Add to ${list.name}…`, maxlength: 200, enterkeyhint: 'enter' });
+    const input = h('input', { type: 'text', placeholder: `添加到${list.name}…`, maxlength: 200, enterkeyhint: 'enter' });
     const form =
       canEdit && state.settings.allowEditing
         ? h(
@@ -237,7 +263,7 @@ function drawChecklists() {
               },
             },
             input,
-            h('button', { class: 'btn primary', type: 'submit', 'aria-label': 'Add' }, '+'),
+            h('button', { class: 'btn primary', type: 'submit', 'aria-label': t('Add') }, '+'),
           )
         : null;
     add(
@@ -277,7 +303,7 @@ function drawChecklists() {
                 ),
               ),
             )
-          : h('p', { class: 'muted d-list-empty' }, 'All done!'),
+          : h('p', { class: 'muted d-list-empty' }, t('All done!')),
         form,
       ),
     );
@@ -289,7 +315,7 @@ async function refreshUpcoming() {
   if (!els.upNext) return;
   const now = new Date();
   try {
-    const { events } = await get(`/events?display=1&from=${encodeURIComponent(new Date(now - 12 * 3600000).toISOString())}&to=${encodeURIComponent(new Date(now.getTime() + 24 * 3600000).toISOString())}`);
+    const { events } = await get(`/events?display=1&from=${encodeURIComponent(startOfDay(now).toISOString())}&to=${encodeURIComponent(new Date(now.getTime() + 24 * 3600000).toISOString())}`);
     state.upcoming = events;
   } catch {
     /* keep the previous list */
@@ -307,11 +333,26 @@ function drawUpNext() {
   els.upNext.update(visible, ctx());
 }
 
+async function refreshEventViews() {
+  await Promise.all([
+    refreshEvents(),
+    refreshUpcoming(),
+    els.countdowns ? drawCountdowns(els.countdowns, ctx().colorFor, '?display=1') : Promise.resolve(),
+  ]);
+}
+
 async function refreshEvents() {
   const { start, end } = viewRange(state.view, state.date, state.settings.weekStartsOn);
   try {
-    const { events } = await get(`/events?display=1&from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`);
-    state.events = events;
+    const view = state.view;
+    const anchor = ymd(state.date);
+    const [result, weekItems] = await Promise.all([
+      get(`/events?display=1&from=${encodeURIComponent(start.toISOString())}&to=${encodeURIComponent(end.toISOString())}`),
+      view === 'week' && state.settings.showChores ? loadWeekChores(start) : Promise.resolve(new Map()),
+    ]);
+    if (state.view !== view || ymd(state.date) !== anchor) return;
+    state.events = result.events;
+    state.weekItems = weekItems;
     els.status.hidden = true;
   } catch (err) {
     handleError(err);
@@ -320,6 +361,7 @@ async function refreshEvents() {
 }
 
 async function refreshAll() {
+  state.today = ymd(new Date());
   try {
     const [c, m, l] = await Promise.all([get('/calendars?display=1'), get('/members'), get('/lists?display=1')]);
     state.calendars = c.calendars;
@@ -356,10 +398,10 @@ async function refreshAll() {
 function handleError(err) {
   if (err.status === 401) {
     storage('remove', TOKEN_KEY);
-    showSignedOut('This display link is no longer valid.');
+    showSignedOut(t('This display link is no longer valid.'));
     throw err;
   }
-  els.status.textContent = `Offline — showing saved data (${err.message})`;
+  els.status.textContent = `离线 — 正在显示已保存的数据（${err.message}）`;
   els.status.hidden = false;
 }
 
@@ -393,10 +435,9 @@ function build() {
   els.night = s.nightMode ? nightOverlay(s) : null;
   els.photos = s.photoFrame ? photoFrame(s, { idleMs: () => s.photoIdleMinutes * 60000 }) : null;
   els.viewButtons = [
-    ['month', 'Month'],
-    ['week', 'Week'],
-    ['day', 'Day'],
-    ['agenda', 'Schedule'],
+    ['month', t('Month')],
+    ['week', t('Week')],
+    ['agenda', t('Schedule')],
   ].map(([v, label]) =>
     h(
       'button',
@@ -404,6 +445,7 @@ function build() {
         dataset: { view: v },
         onclick: () => {
           state.view = v;
+          state.date = new Date();
           refreshEvents();
         },
       },
@@ -414,12 +456,14 @@ function build() {
     els.choreBoard = s.showChores ? h('div', {}) : null;
     els.listsBox = s.showLists ? h('div', { class: 'd-lists' }) : null;
     els.mealsBox = s.showMeals ? h('div', { class: 'd-meals' }) : null;
+    els.choreSection = s.showChores ? h('section', { class: 'd-section', hidden: state.view === 'week' },
+      h('h2', { class: s.showMeals ? 'd-section-gap' : '' }, t('Today’s chores')), els.choreBoard) : null;
     els.side = h(
       'aside',
       { class: 'd-chores' },
-      s.showMeals ? h('section', { class: 'd-section' }, h('h2', {}, '🍽 Meals'), els.mealsBox) : null,
-      s.showChores ? h('section', { class: 'd-section' }, h('h2', { class: s.showMeals ? 'd-section-gap' : '' }, 'Today’s chores'), els.choreBoard) : null,
-      s.showLists ? h('section', { class: 'd-section' }, h('h2', { class: s.showChores || s.showMeals ? 'd-section-gap' : '' }, 'Lists'), els.listsBox) : null,
+      s.showMeals ? h('section', { class: 'd-section' }, h('h2', {}, t('🍽 Meals')), els.mealsBox) : null,
+      els.choreSection,
+      s.showLists ? h('section', { class: 'd-section' }, h('h2', { class: s.showChores || s.showMeals ? 'd-section-gap' : '' }, t('Lists')), els.listsBox) : null,
     );
     els.chores = s.showChores ? els.side : null;
   }
@@ -432,16 +476,16 @@ function build() {
       h(
         'div',
         { class: 'd-controls' },
-        h('div', { class: 'row gap-s' }, h('button', { class: 'icon-btn', 'aria-label': 'Previous', onclick: () => go(-1) }, '‹'), h('button', { class: 'btn', onclick: () => go(0) }, 'Today'), h('button', { class: 'icon-btn', 'aria-label': 'Next', onclick: () => go(1) }, '›'), els.title),
+        h('div', { class: 'row gap-s d-date-nav' }, h('button', { class: 'icon-btn', 'aria-label': t('Previous'), onclick: () => go(-1) }, '‹'), h('button', { class: 'btn d-today', onclick: () => go(0) }, t('Today')), h('button', { class: 'icon-btn', 'aria-label': t('Next'), onclick: () => go(1) }, '›'), els.title),
         h('div', { class: 'segmented' }, els.viewButtons),
-        s.allowEditing ? h('button', { class: 'btn primary', onclick: () => openEventEditor({ ...ctx() }) }, '+ Event') : null,
+        s.allowEditing ? h('button', { class: 'btn primary', onclick: () => openEventEditor({ ...ctx() }) }, t('+ Event')) : null,
         document.fullscreenEnabled
-          ? h('button', { class: 'icon-btn', 'aria-label': 'Full screen', title: 'Full screen', onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}) }, '⛶')
+          ? h('button', { class: 'icon-btn', 'aria-label': t('Full screen'), title: t('Full screen'), onclick: () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}) }, '⛶')
           : null,
       ),
     ),
     h('div', { class: 'd-sub' }, els.upNext?.el, els.countdowns, els.chips, els.status),
-    h('div', { class: `d-body${els.side ? ' with-chores' : ''}` }, els.calendar, els.side),
+    els.body = h('div', { class: `d-body${els.side ? ' with-chores' : ''}` }, els.calendar, els.side),
     els.photos?.el,
     els.night?.el,
   );
@@ -450,16 +494,17 @@ function build() {
 async function boot() {
   let session;
   try {
-    session = await get('/display/session');
+    session = await get(`/display/session${ownerDisplayId ? `?displayId=${encodeURIComponent(ownerDisplayId)}` : ''}`);
   } catch (err) {
-    showSignedOut(err.status === 401 ? (token ? 'This display link is no longer valid.' : 'This screen is not set up yet.') : err.message);
+    showSignedOut(err.status === 401 ? (token ? t('This display link is no longer valid.') : t('This screen is not set up yet.')) : err.message);
     if (err.status === 401) storage('remove', TOKEN_KEY);
     return;
   }
   state.settings = session.settings;
-  state.view = session.settings.view;
+  state.settings.view = displayView(session.settings.view);
+  state.view = state.settings.view;
   applyTheme(session.settings.theme);
-  document.title = session.display ? `${session.display.name} · Hearth` : 'Hearth Display (preview)';
+  document.title = session.display ? `${session.display.name} · Hearth` : t('Hearth Display (preview)');
   build();
   drawClock();
   await refreshAll().catch(() => {});
@@ -494,7 +539,7 @@ async function boot() {
     }
   });
   keepAwake();
-  window.addEventListener('offline', () => toast('Connection lost — will keep retrying.', 'error'));
+  window.addEventListener('offline', () => toast(t('Connection lost — will keep retrying.'), 'error'));
 }
 
 boot();

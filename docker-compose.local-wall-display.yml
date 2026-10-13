@@ -1,0 +1,6 @@
+# Native-architecture local testing; keeps the custom image separate from upstream tags.
+services:
+  app:
+    image: hearth-wall-test:custom-wall-display
+    build:
+      context: ./app

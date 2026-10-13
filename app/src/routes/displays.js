@@ -99,11 +99,18 @@ router.delete('/displays/:id', requireUser, async (req, res) => {
 });
 
 /** What the wall display page needs to boot: works with a display token or a normal session. */
-router.get('/display/session', requireAuth, (req, res) => {
+router.get('/display/session', requireAuth, async (req, res) => {
+  let display = req.display;
+  if (req.query.displayId) {
+    if (req.display) throw httpError(403, 'Sign in to open a saved display from settings.');
+    display = await one('SELECT id, name, settings FROM displays WHERE id = $1 AND user_id = $2',
+      [assertUuid(req.query.displayId, 'display'), req.user.id]);
+    if (!display) throw httpError(404, 'Display not found.');
+  }
   res.json({
     userName: req.user.name,
-    display: req.display ? { name: req.display.name, settings: cleanSettings({}, req.display.settings) } : null,
-    settings: cleanSettings({}, req.display?.settings),
+    display: display ? { name: display.name, settings: cleanSettings({}, display.settings) } : null,
+    settings: cleanSettings({}, display?.settings),
   });
 });
 

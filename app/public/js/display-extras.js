@@ -1,5 +1,6 @@
+import { t, uiLocale } from './display-locale.js';
 import { authHeaders, get } from './api.js';
-import { add, clear, fmtDate, fmtTime, h, modal } from './util.js';
+import { add, clear, fmtDate, fmtTime, h, modal, ymd } from './util.js';
 
 // --- Weather -------------------------------------------------------------------------
 
@@ -11,7 +12,7 @@ export function weatherWidget() {
     onclick: () => {
       if (!last) return;
       modal({
-        title: last.place ? `Weather · ${last.place}` : 'Weather',
+        title: last.place ? `天气 · ${last.place}` : t('Weather'),
         content: h(
           'div',
           { class: 'wx-days' },
@@ -19,9 +20,9 @@ export function weatherWidget() {
             h(
               'div',
               { class: 'wx-day' },
-              h('strong', {}, i === 0 ? 'Today' : new Date(`${d.date}T12:00`).toLocaleDateString([], { weekday: 'long' })),
+              h('strong', {}, i === 0 ? t('Today') : new Date(`${d.date}T12:00`).toLocaleDateString(uiLocale(), { weekday: 'long' })),
               h('span', { class: 'wx-big' }, d.icon),
-              h('span', {}, d.label),
+              h('span', {}, t(d.label)),
               h('span', {}, `${d.high}° / ${d.low}°`),
               d.rain !== null ? h('span', { class: 'muted' }, `💧 ${d.rain}%`) : null,
             ),
@@ -46,7 +47,7 @@ export function weatherWidget() {
         h('span', { class: 'wx-range' }, `${today.high}° / ${today.low}°`),
         today.rain !== null && today.rain >= 30 ? h('span', { class: 'wx-rain' }, `💧${today.rain}%`) : null,
       );
-      el.title = `${weather.current.label}${weather.place ? ` · ${weather.place}` : ''}`;
+      el.title = `${t(weather.current.label)}${weather.place ? ` · ${weather.place}` : ''}`;
       el.hidden = false;
     } catch {
       /* keep showing the last reading */
@@ -59,14 +60,20 @@ export function weatherWidget() {
 
 function relative(ms) {
   const minutes = Math.round(ms / 60000);
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `in ${minutes} min`;
+  if (minutes < 1) return t('now');
+  if (minutes < 60) return `${minutes} 分钟后`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
-  return rest ? `in ${hours} h ${rest} min` : `in ${hours} h`;
+  return rest ? `${hours} 小时 ${rest} 分钟后` : `${hours} 小时后`;
 }
 
-/** "Next: 🦄 Soccer practice · 5 PM · in 1 h 20 min" */
+export function todayAllDayEvents(events, now = new Date()) {
+  const today = ymd(now);
+  // All-day dates are local calendar dates; their end date is exclusive.
+  return events.filter(event => event.allDay && event.start <= today && event.end > today);
+}
+
+/** Today's all-day events plus the current and next timed event. */
 export function upNextStrip() {
   const el = h('div', { class: 'd-upnext', hidden: true });
   function update(events, ctx) {
@@ -74,19 +81,20 @@ export function upNextStrip() {
     const timed = events.filter((e) => !e.allDay).map((e) => ({ ...e, s: new Date(e.start), e2: new Date(e.end) }));
     const current = timed.filter((e) => e.s <= now && e.e2 > now).sort((a, b) => a.e2 - b.e2)[0];
     const next = timed.filter((e) => e.s > now && e.s - now < 12 * 3600000).sort((a, b) => a.s - b.s)[0];
-    const label = (ev) => {
-      const cal = ctx.calendarsById.get(ev.calendarId);
-      const member = cal?.memberId ? ctx.membersById.get(cal.memberId) : null;
-      return [member?.emoji ? `${member.emoji} ` : '', ev.title || '(untitled)'].join('');
-    };
+    const label = (ev) => ev.title || t('(untitled)');
     const parts = [];
-    if (current) parts.push(h('span', { class: 'upnext-item now' }, h('b', {}, 'Now '), label(current), h('span', { class: 'muted' }, ` · until ${fmtTime(current.e2)}`)));
+    for (const event of todayAllDayEvents(events, now)) {
+      parts.push(h('span', { class: 'upnext-item', style: { '--c': ctx.colorFor(event) } },
+        label(event),
+        h('span', { class: 'muted' }, ` · ${t('All day')}`)));
+    }
+    if (current) parts.push(h('span', { class: 'upnext-item now' }, h('b', {}, t('Now ')), label(current), h('span', { class: 'muted' }, ` · 至 ${fmtTime(current.e2)}`)));
     if (next) {
       parts.push(
         h(
           'span',
           { class: 'upnext-item', style: { '--c': ctx.colorFor(next) } },
-          h('b', {}, 'Next '),
+          h('b', {}, t('Next ')),
           label(next),
           h('span', { class: 'muted' }, ` · ${fmtTime(next.s)} · ${relative(next.s - now)}`),
         ),
@@ -117,12 +125,12 @@ export function nightOverlay(settings) {
   let wakeUntil = 0;
   const time = h('div', { class: 'night-time' });
   const date = h('div', { class: 'night-date' });
-  const el = h('div', { class: 'd-night', hidden: true, onclick: () => ((wakeUntil = Date.now() + 2 * 60000), (el.hidden = true)) }, time, date, h('div', { class: 'night-hint' }, 'Tap to wake'));
+  const el = h('div', { class: 'd-night', hidden: true, onclick: () => ((wakeUntil = Date.now() + 2 * 60000), (el.hidden = true)) }, time, date, h('div', { class: 'night-hint' }, t('Tap to wake')));
   function tick(now = new Date()) {
     const active = settings.nightMode && inNightWindow(now, settings.nightStart, settings.nightEnd) && Date.now() > wakeUntil;
     el.hidden = !active;
     if (active) {
-      time.textContent = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      time.textContent = now.toLocaleTimeString(uiLocale(), { hour: 'numeric', minute: '2-digit' });
       date.textContent = fmtDate(now, { weekday: 'long', month: 'long', day: 'numeric' });
     }
     return active;
@@ -206,7 +214,7 @@ export function photoFrame(settings, { idleMs }) {
 
   function tick(lastInteraction, blocked) {
     const now = new Date();
-    clock.textContent = `${now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} · ${fmtDate(now, { weekday: 'long', month: 'long', day: 'numeric' })}`;
+    clock.textContent = `${now.toLocaleTimeString(uiLocale(), { hour: 'numeric', minute: '2-digit' })} · ${fmtDate(now, { weekday: 'long', month: 'long', day: 'numeric' })}`;
     const shouldRun = settings.photoFrame && photos.length > 0 && !blocked && Date.now() - lastInteraction > idleMs();
     if (shouldRun) start();
     else if (running && (blocked || Date.now() - lastInteraction <= idleMs())) stop();

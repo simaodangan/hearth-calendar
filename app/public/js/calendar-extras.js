@@ -1,3 +1,4 @@
+import { t, uiLocale, isChineseDisplay } from './display-locale.js';
 import { get, patch, post } from './api.js';
 import { describeRrule } from './event-editor.js';
 import { parseQuickAdd } from './quickadd.js';
@@ -31,7 +32,7 @@ export function openSearch(ctx, onPick) {
         'button',
         { class: 'search-row', onclick: () => (m.close(), onPick(ev)) },
         h('span', { class: 'dot', style: { background: ctx.colorFor(ev) } }),
-        h('span', { class: 'grow' }, h('strong', {}, ev.title || '(untitled)'), h('small', { class: 'muted' }, [cal?.name, ev.location, ev.recurring ? '↻ repeats' : null].filter(Boolean).join(' · '))),
+        h('span', { class: 'grow' }, h('strong', {}, ev.title || t('(untitled)')), h('small', { class: 'muted' }, [cal?.name, ev.location, ev.recurring ? '↻ repeats' : null].filter(Boolean).join(' · '))),
         h('span', { class: 'search-when' }, fmtDate(b.start, { weekday: 'short', month: 'short', day: 'numeric', year: b.start.getFullYear() === now.getFullYear() ? undefined : 'numeric' }), ev.allDay ? '' : ` · ${fmtTime(b.start)}`),
       );
     };
@@ -136,9 +137,9 @@ export function daysUntil(ev) {
 
 export function countdownLabel(ev) {
   const n = daysUntil(ev);
-  if (n <= 0) return 'Today!';
-  if (n === 1) return 'Tomorrow';
-  return `${n} days`;
+  if (n <= 0) return t('Today!');
+  if (n === 1) return t('Tomorrow');
+  return isChineseDisplay() ? `${n} 天` : `${n} days`;
 }
 
 /** Fills `el` with countdown chips. Resolves to the number shown. */
@@ -169,9 +170,9 @@ export async function moveEvent(ev, day, ctx) {
   let scope = 'all';
   if (ev.recurring) {
     scope = await choose('Move repeating event', null, [
-      { value: 'this', label: 'Only this event' },
-      { value: 'following', label: 'This and following events' },
-      { value: 'all', label: 'All events in the series' },
+      { value: 'this', label: t('Only this event') },
+      { value: 'following', label: t('This and following events') },
+      { value: 'all', label: t('All events in the series') },
     ]);
     if (!scope) return;
   }

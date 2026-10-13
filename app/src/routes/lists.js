@@ -160,7 +160,7 @@ router.get('/items', requireAuth, async (req, res) => {
        LEFT JOIN users cc ON cc.id = c.completed_by
       WHERE i.list_id = ANY($1)
         AND ((l.kind = 'meals' AND i.due_date BETWEEN $3 AND $4)
-          OR (l.kind <> 'meals' AND (i.repeat_days IS NOT NULL OR i.completed_at IS NULL OR i.completed_at > now() - interval '7 days')))
+          OR (l.kind <> 'meals' AND (i.repeat_days IS NOT NULL OR i.completed_at IS NULL OR i.due_date = $2 OR i.completed_at > now() - interval '7 days')))
       ORDER BY i.due_date NULLS FIRST, i.sort, i.created_at`,
     [lists.map((l) => l.id), day, mealsFrom, mealsTo],
   );
