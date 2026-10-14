@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { displayView, isDueOn, loadWeekChores, weekChoreSlots } from '../public/js/display-chores.js';
+import { displayView, isDueOn, loadWeekChores, weekChoreSlots, choreTint } from '../public/js/display-chores.js';
 import { fmtDate, fmtTime, weekdayNames, memberGlyph } from '../public/js/util.js';
 import { t } from '../public/js/display-locale.js';
 import { viewTitle } from '../public/js/calendar-view.js';
@@ -8,6 +8,11 @@ import { viewTitle } from '../public/js/calendar-view.js';
 test('old Day defaults fall back to Week; other supported views remain', () => {
   assert.equal(displayView('day'), 'week');
   for (const view of ['month', 'week', 'agenda']) assert.equal(displayView(view), view);
+});
+test('completed chore tint uses iOS 15 compatible rgba at fifteen percent', () => {
+  assert.equal(choreTint('#5bb974'), 'rgba(91, 185, 116, 0.15)');
+  assert.equal(choreTint('#FFFFFF'), 'rgba(255, 255, 255, 0.15)');
+  assert.equal(choreTint(undefined), 'rgba(141, 123, 106, 0.15)');
 });
 test('exact due dates, recurrence start dates and undated chores', () => {
   assert.equal(isDueOn({ dueDate: '2026-10-13' }, '2026-10-14', '2026-10-13'), false);

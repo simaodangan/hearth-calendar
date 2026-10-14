@@ -20,7 +20,7 @@
 .d-calendar .card-event.title-only { padding: 8px; border: none; }
 .d-day-chore-title { flex: 1; min-width: 0; padding: 4px 6px; font-size: .9em; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
 .d-day-chore.done .d-day-chore-title { text-decoration: line-through; }
-.d-day-chore.done { background: color-mix(in srgb, var(--c) 15%, var(--surface)); }
+.d-day-chore.done { background-color: var(--surface); background-image: linear-gradient(var(--chore-tint), var(--chore-tint)); }
 .d-day-chore:disabled { opacity: .75; cursor: default; }
 .d-calendar .week-body > .card-event { flex-shrink: 0; }
 

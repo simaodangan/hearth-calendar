@@ -3,6 +3,13 @@ import { addDays, confirmDialog, h, memberGlyph, parseYmd, readableText, ymd } f
 
 export const displayView = (view) => ['month', 'week', 'agenda'].includes(view) ? view : 'week';
 
+// Alpha compositing provides the same 15% tint without requiring CSS color-mix().
+export function choreTint(color) {
+  const hex = /^#[0-9a-f]{6}$/i.test(color || '') ? color.slice(1) : '8d7b6a';
+  const rgb = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16));
+  return `rgba(${rgb.join(', ')}, 0.15)`;
+}
+
 // Unlike the sidebar's overdue board, a week cell shows chores due on that exact day.
 // Undated chores stay on today's board; repeating chores respect their start date.
 export function isDueOn(item, day, today) {
@@ -53,7 +60,7 @@ export function renderDayChores({ day, today, items, lists, members, memberFilte
       class: `d-day-chore${item.done ? ' done' : ''}`,
       dataset: { choreId: item.id, day },
       title: `${item.title}${member ? `（${member.name}）` : ''} · ${day === ymd(new Date()) ? '单击修改' : '双击后确认修改'}`,
-      style: { '--c': member?.color || '#8d7b6a' },
+      style: { '--c': member?.color || '#8d7b6a', '--chore-tint': choreTint(member?.color) },
       disabled: byList.get(item.listId).permission === 'view',
       'aria-pressed': String(item.done),
       'aria-label': `${day === ymd(new Date()) ? '单击' : '双击'}${item.done ? '取消完成' : '标记完成'}：${item.title}${member ? `（${member.name}）` : ''}，${day}`,
