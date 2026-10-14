@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { many, one, query } from '../db.js';
 import { assertUuid, cleanText } from '../lib/access.js';
 import { requireAuth, requireUser } from '../lib/auth.js';
-import { httpError, randomToken, sha256 } from '../lib/security.js';
+import { decrypt, encrypt, httpError, randomToken, sha256 } from '../lib/security.js';
 
 const router = Router();
 
@@ -55,7 +55,7 @@ function defaults() {
 }
 
 function displayDto(d) {
-  return { id: d.id, name: d.name, settings: cleanSettings({}, d.settings), createdAt: d.created_at, lastSeenAt: d.last_seen_at };
+  return { id: d.id, name: d.name, settings: cleanSettings({}, d.settings), createdAt: d.created_at, lastSeenAt: d.last_seen_at, hasSavedLink: Boolean(d.token_encrypted) };
 }
 
 router.get('/displays', requireUser, async (req, res) => {
@@ -66,8 +66,9 @@ router.get('/displays', requireUser, async (req, res) => {
 router.post('/displays', requireUser, async (req, res) => {
   const name = cleanText(req.body.name, 80) || 'Wall display';
   const token = randomToken(32);
-  const row = await one('INSERT INTO displays (user_id, name, token_hash, settings) VALUES ($1,$2,$3,$4) RETURNING *', [
-    req.user.id, name, sha256(token), cleanSettings(req.body.settings),
+  res.set('Cache-Control', 'no-store');
+  const row = await one('INSERT INTO displays (user_id, name, token_hash, settings, token_encrypted) VALUES ($1,$2,$3,$4,$5) RETURNING *', [
+    req.user.id, name, sha256(token), cleanSettings(req.body.settings), encrypt(token),
   ]);
   res.status(201).json({ display: displayDto(row), token });
 });
@@ -83,10 +84,27 @@ router.patch('/displays/:id', requireUser, async (req, res) => {
   res.json({ display: displayDto(row) });
 });
 
+router.get('/displays/:id/token', requireUser, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const row = await one('SELECT token_hash, token_encrypted FROM displays WHERE id = $1 AND user_id = $2',
+    [assertUuid(req.params.id, 'display'), req.user.id]);
+  if (!row) throw httpError(404, 'Display not found.');
+  if (!row.token_encrypted) throw httpError(409, 'This older display has no saved link. Use New link once; the old link will stop working.');
+  let token;
+  try {
+    token = decrypt(row.token_encrypted);
+    if (sha256(token) !== row.token_hash) throw new Error('Invalid token');
+  } catch {
+    throw httpError(409, 'The saved link cannot be decrypted. Restore the original APP_SECRET or generate a new link.');
+  }
+  res.json({ token });
+});
+
 router.post('/displays/:id/token', requireUser, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   const token = randomToken(32);
-  const row = await one('UPDATE displays SET token_hash = $1 WHERE id = $2 AND user_id = $3 RETURNING *', [
-    sha256(token), assertUuid(req.params.id, 'display'), req.user.id,
+  const row = await one('UPDATE displays SET token_hash = $1, token_encrypted = $4 WHERE id = $2 AND user_id = $3 RETURNING *', [
+    sha256(token), assertUuid(req.params.id, 'display'), req.user.id, encrypt(token),
   ]);
   if (!row) throw httpError(404, 'Display not found.');
   res.json({ display: displayDto(row), token });

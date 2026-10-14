@@ -15,6 +15,7 @@ mock.module('../src/lib/auth.js',{namedExports:{requireAuth,requireUser:requireA
 mock.module('../src/lib/security.js',{namedExports:{
   httpError:(status,message)=>Object.assign(new Error(message),{status}),
   randomToken:()=>{throw new Error('Unexpected token rotation');},sha256:value=>value,
+  encrypt:value=>value,decrypt:value=>value,
 }});
 const {default:router}=await import('../src/routes/displays.js');
 

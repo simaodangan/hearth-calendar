@@ -838,8 +838,22 @@ async function displays(panel, app) {
               h('span', { class: 'big-emoji' }, '🖥️'),
               h('div', { class: 'grow' }, h('strong', {}, d.name), h('small', { class: 'muted' }, d.lastSeenAt ? `Last active ${new Date(d.lastSeenAt).toLocaleString()}` : 'Not opened yet')),
               h('button', { class: 'btn ghost', onclick: () => displaySettingsForm(d, async (body) => (await patch(`/displays/${d.id}`, body), redraw())) }, 'Settings'),
-              h('a', { class: 'btn ghost', href: `/display?displayId=${encodeURIComponent(d.id)}`,
-                target: '_blank', rel: 'noopener', title: 'Open this display with your signed-in account' }, 'Open display'),
+              d.hasSavedLink ? h('button', { class: 'btn ghost', onclick: async () => {
+                const tab = window.open('about:blank', '_blank');
+                if (tab) tab.opener = null;
+                try {
+                  const r = await get(`/displays/${d.id}/token`);
+                  if (tab) tab.location.href = displayLink(r.token);
+                  else showLink(r.token);
+                } catch (err) { tab?.close(); toast(err.message, 'error'); }
+              } }, 'Open display') : h('a', { class: 'btn ghost', href: `/display?displayId=${encodeURIComponent(d.id)}`,
+                target: '_blank', rel: 'noopener', title: 'Signed-in preview. Use New link once to enable private-link opening.' }, 'Open display'),
+              h('button', { class: 'btn ghost', disabled: !d.hasSavedLink,
+                title: d.hasSavedLink ? 'View the private sign-in link' : 'Use New link once to save a retrievable link. This replaces the old link.',
+                onclick: async () => {
+                  try { const r = await get(`/displays/${d.id}/token`); showLink(r.token); }
+                  catch (err) { toast(err.message, 'error'); }
+                } }, 'Display link'),
               h(
                 'button',
                 {
@@ -847,6 +861,7 @@ async function displays(panel, app) {
                   onclick: async () => {
                     if (!(await confirmDialog('Create a new link? The old link stops working immediately.', { okLabel: 'New link' }))) return;
                     const r = await post(`/displays/${d.id}/token`);
+                    redraw();
                     showLink(r.token);
                   },
                 },
